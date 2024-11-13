@@ -1,13 +1,17 @@
 #include <Wire.h>
 #include <ESP8266WiFi.h>
-#include <INA226_WE.h>
+#include "INA226_WE.h"
 #define I2C_ADDRESS 0x40
  
-String apiKey = "**********";
-const char* ssid = "**********";          // Enter your WiFi Network's SSID
-const char* pass = "**********";  // Enter your WiFi Network's Password
+String apiKey = "";
+const char* ssid = "";          // Enter your WiFi Network's SSID
+const char* pass = "";  // Enter your WiFi Network's Password
 const char* server = "api.thingspeak.com";
- 
+
+//From: https://naturesgenerator.com/blogs/news/lead-acid-battery-voltage-chart
+const float voltage_to_percent[] = {23.25, 23.40, 23.61, 23.91, 24.21, 24.45, 24.81, 25.02, 25.31, 25.56, 25.77}; //10% step iteration, position 0 of the array is 0%
+const int numLevels = sizeof(voltage_to_percent) / sizeof(voltage_to_percent[0]);
+float getBatteryPercentage(float voltage);
 INA226_WE ina226 = INA226_WE(I2C_ADDRESS);
  
 WiFiClient client;
@@ -63,10 +67,13 @@ void loop()
   power_mW = ina226.getBusPower();
   loadVoltage_V  = batteryVoltage_V + (shuntVoltage_mV / 1000);
  
- 
-  Serial.print("Battery Voltage");
+  float batteryVoltage_Percent = getBatteryPercentage(batteryVoltage_V);
+  Serial.print("Battery Voltage: ");
   Serial.print(batteryVoltage_V);
   Serial.println("V");
+  Serial.print("Battery Voltage Percent");
+  Serial.print(batteryVoltage_Percent);
+  Serial.println("%");
  
   Serial.print("Load Voltage: ");
   Serial.print(loadVoltage_V);
@@ -94,6 +101,8 @@ void loop()
     String postStr = apiKey;
     postStr += "&field8=";
     postStr += String(batteryVoltage_V);
+    postStr += "&field7=";
+    postStr += String(batteryVoltage_Percent);
     postStr += "\r\n\r\n\r\n\r\n";
  
     client.print("POST /update HTTP/1.1\n");
@@ -118,5 +127,22 @@ void loop()
   client.stop();
   Serial.println("Sent Successfully :)");
   Serial.println();
-  delay(3000);
+  delay(5000UL);
+}
+
+float getBatteryPercentage(float voltage) {
+    // If the voltage is below or above the range, clamp to 0% or 100%
+    if (voltage <= voltage_to_percent[0]) return 0;
+    if (voltage >= voltage_to_percent[numLevels - 1]) return 100;
+
+    // Find the closest interval in the array
+    for (int i = 0; i < numLevels - 1; i++) {
+        if (voltage < voltage_to_percent[i + 1]) {
+            // Interpolate between voltage_to_percent[i] and voltage_to_percent[i + 1]
+            float range = voltage_to_percent[i + 1] - voltage_to_percent[i];
+            float percentPerVolt = 100.0 / (numLevels - 1); // 100% spread over number of levels
+            return i * percentPerVolt + ((voltage - voltage_to_percent[i]) / range) * percentPerVolt;
+        }
+    }
+    return 100; // Should never reach here
 }
